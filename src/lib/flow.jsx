@@ -348,9 +348,24 @@ export const INITIAL_COMPANY_REQUIREMENTS = [
 ];
 
 export function FlowProvider({ children }) {
-  // simActive: true only within the current browser session after contractor accepts.
-  // Always starts as false on page refresh (sessionStorage, not localStorage).
+  // Check if page is freshly reloaded
+  const isPageReload = (() => {
+    try {
+      const navEntries = typeof performance !== "undefined" && performance.getEntriesByType ? performance.getEntriesByType("navigation") : [];
+      if (navEntries.length > 0) return navEntries[0].type === "reload";
+      return typeof performance !== "undefined" && performance.navigation ? performance.navigation.type === 1 : false;
+    } catch (e) {
+      return false;
+    }
+  })();
+
+  // simActive: true only within current active session after contractor accepts.
+  // On reload/refresh, always resets to false.
   const [simActive, setSimActiveState] = useState(() => {
+    if (isPageReload) {
+      try { sessionStorage.removeItem("astra_sim_active"); } catch (e) {}
+      return false;
+    }
     try { return sessionStorage.getItem("astra_sim_active") === "true"; } catch (e) { return false; }
   });
 
@@ -362,16 +377,56 @@ export function FlowProvider({ children }) {
     } catch (e) {}
   };
 
-  // Requirement initializes from localStorage, defaulting to the Singapore -> Dhamra booking
+  // Requirement initializes as null on refresh/reload so that dashboard shows only the map with no routes.
   const [requirement, setRequirementState] = useState(() => {
+    if (isPageReload) {
+      try {
+        sessionStorage.removeItem("astra_sim_active");
+        localStorage.removeItem("astra_requirement");
+      } catch (e) {}
+      return null;
+    }
     try {
       const saved = localStorage.getItem("astra_requirement");
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.status === "COMPLETED") return null;
+        return parsed;
+      }
     } catch (e) {}
-    return SINGAPORE_DHAMRA_REQUIREMENT;
+    return null;
   });
 
-  const [fixturesList, setFixturesList] = useState(INITIAL_FIXTURES);
+  // Fixtures ledger initialized from localStorage or defaults, ensuring completed fixtures persist in history
+  const [fixturesList, setFixturesListState] = useState(() => {
+    try {
+      const saved = localStorage.getItem("astra_fixtures_list");
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return INITIAL_FIXTURES;
+  });
+
+  const setFixturesList = (updater) => {
+    setFixturesListState((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      try {
+        localStorage.setItem("astra_fixtures_list", JSON.stringify(next));
+      } catch (e) {}
+      return next;
+    });
+  };
+
+  // Clear transient dashboard requirement on beforeunload so reload returns to clean map
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      try {
+        sessionStorage.removeItem("astra_sim_active");
+        localStorage.removeItem("astra_requirement");
+      } catch (e) {}
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
 
   // Central company requirements for Contractor Confirmation Dashboard
   const [companyRequirements, setCompanyRequirements] = useState(INITIAL_COMPANY_REQUIREMENTS);
@@ -524,9 +579,12 @@ export function FlowProvider({ children }) {
   };
 
   const acceptContractorFixture = (reqId) => {
-    const target = requirement?.id === reqId 
-      ? requirement 
-      : (companyRequirements.find(c => c.id === reqId) || fixturesList.find(f => f.id === reqId) || requirement);
+    const target = (requirement?.id === reqId ? requirement : null)
+      || companyRequirements.find(c => c.id === reqId) 
+      || fixturesList.find(f => f.id === reqId) 
+      || requirement 
+      || SINGAPORE_DHAMRA_REQUIREMENT;
+
     const updated = {
       ...target,
       contractorAccepted: true,
@@ -534,17 +592,78 @@ export function FlowProvider({ children }) {
       status: "ACTIVE_IN_TRANSIT"
     };
     setRequirement(updated);
+    setSimProgress(0);
+    setIsPlaying(true);
     setSimActive(true);
+    toast.success(`✅ Fixture #${updated.id} Accepted & Confirmed! Vessel dispatched on sea lane.`);
   };
 
   const markFixtureCompleted = (reqId) => {
-    const target = requirement?.id === reqId ? requirement : fixturesList.find(f => f.id === reqId) || requirement;
+    const target = (requirement?.id === reqId ? requirement : null)
+      || fixturesList.find(f => f.id === reqId)
+      || companyRequirements.find(c => c.id === reqId)
+      || requirement
+      || SINGAPORE_DHAMRA_REQUIREMENT;
+    const targetId = reqId || target?.id || "REQ-2026-8820";
+
     const updated = {
       ...target,
+      id: targetId,
       status: "COMPLETED",
       completedDate: new Date().toISOString()
     };
-    setRequirement(updated);
+
+    setRequirementState(updated);
+    try {
+      localStorage.setItem("astra_requirement", JSON.stringify(updated));
+    } catch (e) {}
+
+    setFixturesList((prev) => {
+      const exists = prev.some(f => f.id === targetId);
+      if (exists) {
+        return prev.map(f => f.id === targetId ? { ...f, ...updated } : f);
+      }
+      return [updated, ...prev];
+    });
+
+    setCompanyRequirements((prev) => {
+      return prev.map(c => c.id === targetId ? { ...c, ...updated } : c);
+    });
+
+    addEvent({
+      type: "VOYAGE_COMPLETED",
+      severity: "SUCCESS",
+      title: `🏁 Multimodal Transit Completed (${targetId})`,
+      detail: `Vessel ${updated.selectedVessel?.name || "Vessel"} cleared berth at ${updated.destinationPort}. Road fleet delivered 100% of material to plant.`,
+      requirementId: targetId,
+      roleRecipient: ["company", "contractor", "road_transporter", "port_operator"]
+    });
+  };
+
+  // Quick book helper for Singapore -> Dhamra shipment
+  const bookSampleSingaporeDhamra = () => {
+    const booking = {
+      ...SINGAPORE_DHAMRA_REQUIREMENT,
+      id: `REQ-${Date.now().toString().slice(-4)}`,
+      status: "PENDING_REVIEW",
+      contractorAccepted: false,
+      timestamp: new Date().toISOString()
+    };
+    setRequirement(booking);
+    setSimActive(false);
+    setSimProgress(0);
+    setIsPlaying(false);
+    addEvent({
+      id: `EV-${Date.now()}`,
+      type: "NEW_REQUIREMENT_CREATED",
+      severity: "INFO",
+      title: `📦 Booking Created: Singapore ➔ Dhamra (${booking.cargoQuantity.toLocaleString()} MT Coal)`,
+      detail: `Shipping requirement booked. Awaiting contractor review & fixture confirmation.`,
+      requirementId: booking.id,
+      roleRecipient: ["contractor", "company"]
+    });
+    toast.success(`Booking #${booking.id} created! Active sea-lane route displayed on nautical map. Awaiting contractor acceptance.`);
+    return booking;
   };
 
   const [forecast, setForecast] = useState(null);
@@ -911,23 +1030,54 @@ export function FlowProvider({ children }) {
   const [portDiverted, setPortDiverted] = useState(false);
 
 
-  // Ticker for fast-forward simulation (approx 25-30 seconds for full 0-100% cycle)
+  // Ticker for fast-forward simulation: stops at 100% and does NOT repeat in a cycle
   useEffect(() => {
     if (!isPlaying) return;
     const interval = setInterval(() => {
       setSimProgress((prev) => {
-        if (prev >= 100) return 0;
+        if (prev >= 100) {
+          setIsPlaying(false);
+          return 100;
+        }
         // ── Scenario 1 guard: freeze simProgress while vessel is held in swell ──
         // Clamped at 57% so last-mile delivery never triggers while main vessel is held in sea
         if (weatherDelayActive && !berthReallocated && prev >= 57) return prev;
 
         // When resumed after berth clearance, move smoothly and slowly so the user can easily observe the voyage
         const step = (weatherDelayActive && berthReallocated) ? (0.15 * (simSpeed || 1)) : (0.28 * (simSpeed || 1));
-        return Math.min(100, prev + step);
+        const next = prev + step;
+        if (next >= 100) {
+          setIsPlaying(false);
+          return 100;
+        }
+        return next;
       });
     }, 100);
     return () => clearInterval(interval);
   }, [isPlaying, simSpeed, weatherDelayActive, berthReallocated]);
+
+  // When simProgress reaches 100%, stop simulation and mark fixture as completed in context fixtures and history.
+  // After a short delay, auto-clear simActive & requirement so Dashboard returns to the clean map-only view.
+  useEffect(() => {
+    if (simProgress >= 100) {
+      setIsPlaying(false);
+      if (requirement && requirement.status === "ACTIVE_IN_TRANSIT") {
+        markFixtureCompleted(requirement.id);
+        toast.success("🏁 Multimodal Transit Completed! Material delivered to plant. Fixture marked as COMPLETED.");
+        // Auto-transition: after 3.5s, clear session so Dashboard returns to clean map (no routes)
+        const autoResetTimer = setTimeout(() => {
+          setSimActive(false);
+          setRequirementState(null);
+          try {
+            sessionStorage.removeItem("astra_sim_active");
+            localStorage.removeItem("astra_requirement");
+          } catch (e) {}
+          toast("🗺️ Returning to clean radar view…", { icon: "🔄", duration: 2000 });
+        }, 3500);
+        return () => clearTimeout(autoResetTimer);
+      }
+    }
+  }, [simProgress]);
 
   // Secondary vessel approach animation ticker (runs when weatherDelayActive & not yet reallocated)
   useEffect(() => {
@@ -1098,6 +1248,9 @@ export function FlowProvider({ children }) {
 
         // Simulation visibility flag (sessionStorage-backed, clears on page refresh)
         simActive, setSimActive,
+
+        // Quick booking helper
+        bookSampleSingaporeDhamra,
       }}
     >
       {children}

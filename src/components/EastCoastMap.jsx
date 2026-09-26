@@ -434,7 +434,8 @@ export default function EastCoastMap({
   activePort: propActivePort, 
   highlightedPorts = [], 
   onPortClick: propOnPortClick,
-  originPort: propOriginPort
+  originPort: propOriginPort,
+  showRoute = true
 }) {
   const { requirement } = useFlow?.() || {};
   const flowOrigin = requirement?.originPort;
@@ -680,6 +681,7 @@ export default function EastCoastMap({
           <NauticalLeafletMap 
             selectedOrigin={selectedOrigin}
             selectedDestination={selectedPort}
+            showRoute={showRoute}
             onPortSelect={(port) => handlePortClick(port)}
             onVesselSelect={(vessel) => setSelectedVessel(vessel)}
           />
@@ -860,8 +862,8 @@ export default function EastCoastMap({
             </g>
           )}
 
-          {/* Active Port Route Inbound Glow & Animation */}
-          {activePortObj && (
+          {/* Active Port Route Inbound Glow & Animation (Hidden when showRoute is false) */}
+          {activePortObj && showRoute && (
             <g>
               {/* Pulsing Target Ring around active destination port */}
               <circle cx={activePortObj.x} cy={activePortObj.y} r="8" fill="#10B981" fillOpacity="0.4" />

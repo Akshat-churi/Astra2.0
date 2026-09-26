@@ -4,7 +4,7 @@ import {
   Navigation, Wind, Layers, Compass, MapPin, 
   Activity, ShieldAlert, Anchor, Ship, RefreshCw,
   Info, AlertTriangle, Eye, EyeOff, Radio,
-  Search, X, Crosshair, ChevronRight, ExternalLink, Gauge
+  Search, X, Crosshair, ChevronRight, ChevronDown, ExternalLink, Gauge
 } from "lucide-react";
 import axios from "@/lib/api";
 
@@ -32,12 +32,6 @@ const BASEMAP_TILES = {
     url: "https://services.arcgisonline.com/arcgis/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
     options: { maxZoom: 16, attribution: "Esri, HERE, Garmin, &copy; OpenStreetMap" }
   },
-  ocean: {
-    id: "ocean",
-    name: "Nautical Ocean",
-    url: "https://server.arcgisonline.com/ArcGIS/rest/services/Ocean/World_Ocean/MapServer/tile/{z}/{y}/{x}",
-    options: { maxZoom: 13, attribution: "Esri, GEBCO, NOAA, National Geographic" }
-  },
   satellite: {
     id: "satellite",
     name: "Satellite",
@@ -55,6 +49,7 @@ const BASEMAP_TILES = {
 export default function NauticalLeafletMap({
   selectedOrigin = "Newcastle",
   selectedDestination = "Paradip",
+  showRoute: propShowRoute = true,
   onPortSelect,
   onVesselSelect
 }) {
@@ -79,8 +74,32 @@ export default function NauticalLeafletMap({
   // Layer Visibility Toggles
   const [showSeamarks, setShowSeamarks] = useState(true);
   const [showVessels, setShowVessels] = useState(true);
-  const [showRoute, setShowRoute] = useState(true);
+  const [showRoute, setShowRoute] = useState(propShowRoute);
   const [showWeatherOverlay, setShowWeatherOverlay] = useState(true);
+
+  // Map Controls Dropdown Menu State
+  const [showMapMenu, setShowMapMenu] = useState(false);
+  const menuRef = useRef(null);
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setShowMapMenu(false);
+      }
+    };
+    if (showMapMenu) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [showMapMenu]);
+
+  // Synchronize showRoute when propShowRoute changes
+  useEffect(() => {
+    setShowRoute(propShowRoute);
+  }, [propShowRoute]);
 
   // Initialize Leaflet Map
   useEffect(() => {
@@ -188,13 +207,17 @@ export default function NauticalLeafletMap({
         setApiHealth(healthRes.data);
       }
 
-      // 4. Live Nautical Route Plan
-      const routeRes = await axios.post("/live/route-plan", {
-        origin: selectedOrigin,
-        destination: selectedDestination
-      });
-      if (routeRes.data && routeRes.data.waypoints) {
-        setRouteData(routeRes.data);
+      // 4. Live Nautical Route Plan (only when showRoute is enabled)
+      if (showRoute) {
+        const routeRes = await axios.post("/live/route-plan", {
+          origin: selectedOrigin,
+          destination: selectedDestination
+        });
+        if (routeRes.data && routeRes.data.waypoints) {
+          setRouteData(routeRes.data);
+        }
+      } else {
+        setRouteData(null);
       }
     } catch (err) {
       console.error("Failed to load live nautical data:", err);
@@ -207,7 +230,7 @@ export default function NauticalLeafletMap({
     fetchLiveData();
     const timer = setInterval(fetchLiveData, 45000); // 45s live sync
     return () => clearInterval(timer);
-  }, [selectedOrigin, selectedDestination]);
+  }, [selectedOrigin, selectedDestination, showRoute]);
 
   // Real-time Dynamic Positional Drift (Dead-Reckoning every 2.5s)
   useEffect(() => {
@@ -524,153 +547,193 @@ export default function NauticalLeafletMap({
       {/* Top HUD Floating Control Bar */}
       <div className="absolute top-4 left-4 right-4 z-[1000] flex flex-wrap items-center justify-between gap-3 pointer-events-none">
         
-        {/* Left: Origin ➔ Destination Route Banner */}
-        <div className="pointer-events-auto bg-slate-900/90 backdrop-blur-md border border-slate-700/80 px-4 py-2 rounded-xl shadow-xl flex items-center gap-3">
-          <div className="p-2 bg-cyan-500/20 text-cyan-400 rounded-lg">
-            <Compass className="w-5 h-5 animate-spin-slow" />
-          </div>
-          <div>
-            <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Active Nautical Sea-Lane</div>
-            <div className="text-sm font-extrabold text-white flex items-center gap-2">
-              <span className="text-amber-400">{selectedOrigin}</span>
-              <span className="text-slate-500 font-mono">━━━━▶</span>
-              <span className="text-emerald-400">{selectedDestination}</span>
+        {/* Left: Origin ➔ Destination Route Banner (Hidden when showRoute is false) */}
+        {showRoute && (
+          <div className="pointer-events-auto bg-slate-900/90 backdrop-blur-md border border-slate-700/80 px-4 py-2 rounded-xl shadow-xl flex items-center gap-3">
+            <div className="p-2 bg-cyan-500/20 text-cyan-400 rounded-lg">
+              <Compass className="w-5 h-5 animate-spin-slow" />
             </div>
-          </div>
-
-          {routeData && (
-            <div className="pl-3 border-l border-slate-700/80 flex items-center gap-3 text-xs">
-              <div>
-                <div className="text-[10px] text-slate-400">Distance</div>
-                <div className="font-mono font-bold text-cyan-300">{routeData.distanceNm.toLocaleString()} NM</div>
-              </div>
-              <div>
-                <div className="text-[10px] text-slate-400">Est. Transit</div>
-                <div className="font-mono font-bold text-white">{(routeData.distanceNm / (14 * 24)).toFixed(1)} Days</div>
+            <div>
+              <div className="text-[10px] uppercase font-bold tracking-wider text-slate-400">Active Nautical Sea-Lane</div>
+              <div className="text-sm font-extrabold text-white flex items-center gap-2">
+                <span className="text-amber-400">{selectedOrigin}</span>
+                <span className="text-slate-500 font-mono">━━━━▶</span>
+                <span className="text-emerald-400">{selectedDestination}</span>
               </div>
             </div>
-          )}
-        </div>
 
-        {/* Right: Action Buttons, Basemap Selector & Layer Controls */}
-        <div className="pointer-events-auto flex flex-wrap items-center gap-2">
-          
-          {/* PRIMARY BUTTON: Nearby East Coast Vessels Dynamic Live Radar Button */}
+            {routeData && (
+              <div className="pl-3 border-l border-slate-700/80 flex items-center gap-3 text-xs">
+                <div>
+                  <div className="text-[10px] text-slate-400">Distance</div>
+                  <div className="font-mono font-bold text-cyan-300">{routeData.distanceNm.toLocaleString()} NM</div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-slate-400">Est. Transit</div>
+                  <div className="font-mono font-bold text-white">{(routeData.distanceNm / (14 * 24)).toFixed(1)} Days</div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Right: Clean Compact Actions & Map Options Dropdown */}
+        <div className="pointer-events-auto flex items-center gap-2" ref={menuRef}>
+          {/* Nearby East Coast Vessels Radar Button */}
           <button
             onClick={handleScanNearbyVessels}
-            className={`px-3.5 py-2 rounded-xl font-extrabold text-xs flex items-center gap-2 transition-all shadow-xl active:scale-95 ${
+            className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-2 transition-all shadow-xl active:scale-95 ${
               showNearbyDrawer
                 ? "bg-emerald-400 text-slate-950 shadow-emerald-500/50 ring-2 ring-emerald-300 scale-105"
-                : "bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white border border-emerald-400/50 hover:scale-105"
+                : "bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40 hover:text-white backdrop-blur-md"
             }`}
             title="Scan & dynamically view all vessels nearby East Coast India in real time"
           >
-            <span className="relative flex h-2.5 w-2.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-200"></span>
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
             </span>
-            <Radio className="w-4 h-4 animate-pulse" />
-            <span>Nearby East Coast Vessels ({fleet.length})</span>
+            <Radio className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+            <span>Nearby Vessels ({fleet.length})</span>
           </button>
 
-          {/* Basemap Switcher */}
-          <div className="bg-slate-900/90 backdrop-blur-md border border-slate-700/80 p-1 rounded-xl shadow-xl flex items-center gap-1 text-xs">
-            <span className="text-[10px] text-slate-400 font-mono font-bold px-1.5 uppercase flex items-center gap-1">
-              <Layers className="w-3 h-3 text-cyan-400" /> Base
-            </span>
-            {[
-              { id: "dark", label: "Tactical Dark" },
-              { id: "ocean", label: "Nautical Ocean" },
-              { id: "satellite", label: "Satellite" },
-              { id: "osm", label: "Standard" }
-            ].map((b) => (
-              <button
-                key={b.id}
-                onClick={() => setBasemapStyle(b.id)}
-                className={`px-2 py-1 rounded-lg text-xs font-medium transition-all ${
-                  basemapStyle === b.id
-                    ? "bg-blue-600 text-white font-bold shadow"
-                    : "text-slate-400 hover:text-white hover:bg-slate-800"
-                }`}
-              >
-                {b.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Real VesselAPI Telemetry Status Pill */}
-          <div className="bg-slate-900/90 backdrop-blur-md border border-slate-700/80 px-3 py-1.5 rounded-xl shadow-xl flex items-center gap-2 text-xs" title={`VesselAPI Active: ${apiHealth?.apiKey || '2fa60d...aebf'}`}>
-            <span className="relative flex h-2.5 w-2.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-            </span>
-            <span className="font-mono font-bold text-slate-200">VesselAPI</span>
-            <span className="text-[10px] px-1.5 py-0.5 bg-emerald-500/20 text-emerald-300 rounded font-bold font-mono">
-              {fleet.length > 0 ? `${fleet.length} LIVE AIS` : (apiHealth?.pingLatencyMs ? `${apiHealth.pingLatencyMs}ms` : '42ms LIVE')}
-            </span>
-          </div>
-
-          {/* Quick Layer Toggles with Small Nearby Vessels Button */}
-          <div className="bg-slate-900/90 backdrop-blur-md border border-slate-700/80 p-1 rounded-xl shadow-xl flex items-center gap-1 text-xs">
-            {/* Small Dedicated Button: Nearby East Coast Vessels */}
+          {/* Map Options / Controls Dropdown Menu Trigger */}
+          <div className="relative">
             <button
-              onClick={handleScanNearbyVessels}
-              className={`px-2.5 py-1 rounded-lg font-bold flex items-center gap-1.5 transition-all text-xs ${
-                showNearbyDrawer
-                  ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/50 ring-1 ring-emerald-300'
-                  : 'bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40 hover:text-white'
+              onClick={() => setShowMapMenu(prev => !prev)}
+              className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-2 transition-all shadow-xl border backdrop-blur-md ${
+                showMapMenu
+                  ? "bg-blue-600 text-white border-blue-400 shadow-blue-500/30"
+                  : "bg-slate-900/90 hover:bg-slate-800 text-slate-200 border-slate-700/80 hover:text-white"
               }`}
-              title="Click to see all vessels nearby East Coast India with live real-time dynamic location"
+              title="Toggle Map Layers, Overlays & Base Maps"
             >
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
-              </span>
-              <Radio className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-              <span>Nearby Vessels ({fleet.length})</span>
+              <Layers className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Map Options</span>
+              <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${showMapMenu ? 'rotate-180' : ''}`} />
             </button>
 
-            <button
-              onClick={() => setShowSeamarks(!showSeamarks)}
-              className={`px-2 py-1 rounded-lg font-medium flex items-center gap-1 transition-colors ${
-                showSeamarks ? 'bg-cyan-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
-              }`}
-              title="Toggle OpenSeaMap Seamarks (Depth contours, Buoys, TSS)"
-            >
-              <Anchor className="w-3.5 h-3.5" />
-              <span>Seamarks</span>
-            </button>
+            {/* Dropdown Menu Modal */}
+            {showMapMenu && (
+              <div className="absolute right-0 top-full mt-2 w-72 bg-slate-900/95 backdrop-blur-xl border border-slate-700/80 rounded-2xl shadow-2xl p-3.5 z-[1100] text-xs space-y-3.5 animate-in fade-in zoom-in-95 duration-150">
+                {/* Header */}
+                <div className="flex items-center justify-between border-b border-slate-700/70 pb-2">
+                  <div className="flex items-center gap-2 font-bold text-white">
+                    <Layers className="w-4 h-4 text-cyan-400" />
+                    <span>Map Controls & Layers</span>
+                  </div>
+                  <button
+                    onClick={() => setShowMapMenu(false)}
+                    className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+                    title="Close Menu"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
 
-            <button
-              onClick={() => setShowVessels(!showVessels)}
-              className={`px-2 py-1 rounded-lg font-medium flex items-center gap-1 transition-colors ${
-                showVessels ? 'bg-cyan-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
-              }`}
-              title="Toggle Live AIS Vessels"
-            >
-              <Ship className="w-3.5 h-3.5" />
-              <span>Fleet ({fleet.length})</span>
-            </button>
+                {/* Base Maps Section (Tactical Dark, Satellite, Standard - Nautical Ocean removed) */}
+                <div className="space-y-1.5">
+                  <span className="text-[10px] text-slate-400 font-mono font-bold uppercase tracking-wider block">
+                    Base Map Style
+                  </span>
+                  <div className="grid grid-cols-3 gap-1 bg-slate-950/60 p-1 rounded-xl border border-slate-800">
+                    {[
+                      { id: "dark", label: "Tactical Dark" },
+                      { id: "satellite", label: "Satellite" },
+                      { id: "osm", label: "Standard" }
+                    ].map((b) => (
+                      <button
+                        key={b.id}
+                        onClick={() => setBasemapStyle(b.id)}
+                        className={`px-2 py-1.5 rounded-lg text-[11px] font-semibold text-center transition-all ${
+                          basemapStyle === b.id
+                            ? "bg-blue-600 text-white shadow font-bold"
+                            : "text-slate-400 hover:text-white hover:bg-slate-800/80"
+                        }`}
+                      >
+                        {b.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-            <button
-              onClick={() => setShowWeatherOverlay(!showWeatherOverlay)}
-              className={`px-2 py-1 rounded-lg font-medium flex items-center gap-1 transition-colors ${
-                showWeatherOverlay ? 'bg-cyan-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
-              }`}
-              title="Toggle Live Marine Weather"
-            >
-              <Wind className="w-3.5 h-3.5" />
-              <span>Weather</span>
-            </button>
+                {/* Map Overlays & Layers */}
+                <div className="space-y-1.5">
+                  <span className="text-[10px] text-slate-400 font-mono font-bold uppercase tracking-wider block">
+                    Map Overlays
+                  </span>
+                  <div className="space-y-1 bg-slate-950/60 p-1.5 rounded-xl border border-slate-800">
+                    <button
+                      onClick={() => setShowVessels(!showVessels)}
+                      className="w-full flex items-center justify-between p-1.5 rounded-lg hover:bg-slate-800/80 text-left transition-colors"
+                    >
+                      <span className="flex items-center gap-2 text-slate-300">
+                        <Ship className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>Live AIS Fleet ({fleet.length})</span>
+                      </span>
+                      <span className={`w-4 h-4 rounded flex items-center justify-center border text-[10px] font-bold ${
+                        showVessels ? 'bg-cyan-600 border-cyan-500 text-white' : 'border-slate-600 text-transparent'
+                      }`}>
+                        ✓
+                      </span>
+                    </button>
 
-            <button
-              onClick={fetchLiveData}
-              disabled={loading}
-              className="p-1.5 text-slate-400 hover:text-cyan-300 transition-colors rounded-lg"
-              title="Refresh Live AIS & Weather"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-cyan-400' : ''}`} />
-            </button>
+                    <button
+                      onClick={() => setShowSeamarks(!showSeamarks)}
+                      className="w-full flex items-center justify-between p-1.5 rounded-lg hover:bg-slate-800/80 text-left transition-colors"
+                    >
+                      <span className="flex items-center gap-2 text-slate-300">
+                        <Anchor className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>OpenSeaMap Seamarks</span>
+                      </span>
+                      <span className={`w-4 h-4 rounded flex items-center justify-center border text-[10px] font-bold ${
+                        showSeamarks ? 'bg-cyan-600 border-cyan-500 text-white' : 'border-slate-600 text-transparent'
+                      }`}>
+                        ✓
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={() => setShowWeatherOverlay(!showWeatherOverlay)}
+                      className="w-full flex items-center justify-between p-1.5 rounded-lg hover:bg-slate-800/80 text-left transition-colors"
+                    >
+                      <span className="flex items-center gap-2 text-slate-300">
+                        <Wind className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>Marine Weather & Swell</span>
+                      </span>
+                      <span className={`w-4 h-4 rounded flex items-center justify-center border text-[10px] font-bold ${
+                        showWeatherOverlay ? 'bg-cyan-600 border-cyan-500 text-white' : 'border-slate-600 text-transparent'
+                      }`}>
+                        ✓
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Quick Actions */}
+                <div className="pt-1 border-t border-slate-700/70 space-y-1.5">
+                  <button
+                    onClick={fetchLiveData}
+                    disabled={loading}
+                    className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition-colors font-medium text-[11px]"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${loading ? 'animate-spin text-cyan-400' : ''}`} />
+                    <span>{loading ? "Syncing AIS Data..." : "Refresh Live AIS & Weather"}</span>
+                  </button>
+                </div>
+
+                {/* Unobtrusive VesselAPI Telemetry Status inside dropdown */}
+                <div className="flex items-center justify-between px-2.5 py-1.5 bg-slate-950/80 rounded-xl text-[10px] font-mono text-slate-400 border border-slate-800/80">
+                  <div className="flex items-center gap-1.5">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-ping"></span>
+                    <span className="text-slate-300 font-semibold">VesselAPI</span>
+                  </div>
+                  <span className="text-emerald-400 font-bold">
+                    {fleet.length > 0 ? `${fleet.length} LIVE AIS` : (apiHealth?.pingLatencyMs ? `${apiHealth.pingLatencyMs}ms` : '42ms LIVE')}
+                  </span>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -833,22 +896,6 @@ export default function NauticalLeafletMap({
         </div>
       </div>
 
-      {/* Bottom-Right Floating Action Button for Instant East Coast Vessel Tracking */}
-      <div className="absolute bottom-4 right-4 z-[1000] pointer-events-none">
-        <button
-          onClick={handleScanNearbyVessels}
-          className="pointer-events-auto bg-slate-900/95 hover:bg-slate-800 text-emerald-300 hover:text-white border border-emerald-500/60 hover:border-emerald-400 px-3.5 py-2 rounded-xl shadow-2xl flex items-center gap-2 text-xs font-bold transition-all hover:scale-105 active:scale-95 group backdrop-blur-md"
-          title="Click to view all vessels nearby East Coast India in real time"
-        >
-          <span className="relative flex h-2.5 w-2.5">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-          </span>
-          <Ship className="w-4 h-4 text-emerald-300 group-hover:rotate-12 transition-transform" />
-          <span>Nearby East Coast Vessels ({fleet.length})</span>
-          <ChevronRight className="w-3.5 h-3.5 text-slate-400 group-hover:translate-x-0.5 transition-transform" />
-        </button>
-      </div>
 
     </div>
   );

@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 import Badge from "../components/Badge";
 import TopDownVesselIcon from "../components/VesselIcons";
 import { 
-  Ship, Play, Clock, CheckCircle2, ArrowRight, FileText, 
+  Ship, Play, Clock, CheckCircle2, ArrowRight, ArrowLeft, Eye, FileText, 
   Layers, MapPin, Building2, Truck, ShieldCheck, Award, Fuel, Anchor, AlertTriangle,
   Search, Filter, Download, ExternalLink, Check, X, UserCheck, Calendar, DollarSign,
   Briefcase, FileCheck, RefreshCw
@@ -206,7 +206,7 @@ export default function DecisionHistory() {
   const nav = useNavigate();
   const role = user?.role || "company";
   
-  const [activeTab, setActiveTab] = useState("current"); // "current" | "past"
+  const [inspectedFixture, setInspectedFixture] = useState(null); // When set, views detailed fixture inspector
   const [statusFilter, setStatusFilter] = useState("ALL"); // "ALL" | "ACTIVE" | "PENDING" | "COMPLETED"
   const [searchQuery, setSearchQuery] = useState("");
   const [showRecapModal, setShowRecapModal] = useState(false);
@@ -214,8 +214,8 @@ export default function DecisionHistory() {
   const isCompany = role === "company";
   const isContractor = role === "contractor" || role === "chartering_operator";
 
-  // Fallback to DEFAULT_REQUIREMENT if requirement is null
-  const activeReq = requirement || DEFAULT_REQUIREMENT;
+  // Use the inspected fixture when inspecting, or active requirement, or fallback
+  const activeReq = inspectedFixture || requirement || DEFAULT_REQUIREMENT;
 
   // Status determination helper
   const getFixtureStatusMeta = (f) => {
@@ -332,34 +332,37 @@ export default function DecisionHistory() {
           </p>
         </div>
 
-        {/* Tab Toggle: Current Active vs Past History */}
-        <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200 text-xs font-mono font-bold">
-          <button
-            onClick={() => setActiveTab("current")}
-            className={`px-3.5 py-1.5 rounded-md transition-all flex items-center gap-1.5 ${
-              activeTab === "current" ? "bg-blue-900 text-white shadow" : "text-slate-600 hover:text-slate-900"
-            }`}
-          >
-            <span className={`w-2 h-2 rounded-full ${currentStatusMeta.dot}`} />
-            <span>ACTIVE FIXTURE #{activeReq.id}</span>
-          </button>
-          <button
-            onClick={() => setActiveTab("past")}
-            className={`px-3.5 py-1.5 rounded-md transition-all flex items-center gap-1.5 ${
-              activeTab === "past" ? "bg-blue-900 text-white shadow" : "text-slate-600 hover:text-slate-900"
-            }`}
-          >
-            <Clock size={13} />
-            <span>ALL FIXTURES LEDGER ({fixturesList.length})</span>
-          </button>
+        {/* Total Bookings & Fixtures Summary Badge */}
+        <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-mono">
+          <Clock size={14} className="text-blue-900" />
+          <span className="font-bold text-slate-800">Total Bookings & Fixtures:</span>
+          <span className="px-2 py-0.5 rounded bg-blue-900 text-white font-extrabold">{fixturesList.length}</span>
         </div>
       </div>
 
       {/* ========================================================================= */}
-      {/* TAB 1: CURRENT ACTIVE FIXTURE WITH CONTRACTOR ACCEPTANCE & LIFECYCLE */}
+      {/* DETAILED FIXTURE INSPECTION VIEW (ACCESSED VIA INSPECT BUTTON) */}
       {/* ========================================================================= */}
-      {activeTab === "current" && (
+      {inspectedFixture && (
         <div className="space-y-5 animate-in fade-in">
+          {/* Back to All Fixtures Ledger Navigation Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+            <button
+              onClick={() => setInspectedFixture(null)}
+              className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold font-mono transition-all shadow group"
+            >
+              <ArrowLeft size={14} className="group-hover:-translate-x-0.5 transition-transform" />
+              <span>← Back to All Fixtures Ledger</span>
+            </button>
+            <div className="flex items-center gap-2 text-xs font-mono">
+              <span className="text-slate-500">Inspecting Fixture:</span>
+              <span className="px-2.5 py-0.5 bg-blue-100 text-blue-900 rounded font-bold font-mono">#{activeReq.id}</span>
+              <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${currentStatusMeta.color}`}>
+                {currentStatusMeta.label}
+              </span>
+            </div>
+          </div>
+
           {/* Main Active Fixture Banner */}
           <div className="astra-card p-6 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white shadow-xl space-y-6">
             <div className="flex flex-wrap items-center justify-between gap-4 border-b border-blue-900/60 pb-4">
@@ -391,7 +394,7 @@ export default function DecisionHistory() {
                 </button>
 
                 <button
-                  onClick={() => { setSimActive(true); nav("/"); }}
+                  onClick={() => { setRequirement(activeReq); setSimActive(true); nav("/"); }}
                   className="btn-primary px-5 h-11 text-xs font-bold gap-2 bg-emerald-500 hover:bg-emerald-600 text-slate-950 shadow-lg"
                 >
                   <Play size={15} />
@@ -630,9 +633,9 @@ export default function DecisionHistory() {
       )}
 
       {/* ========================================================================= */}
-      {/* TAB 2: PAST ARCHIVED FIXTURES TABLE & FILTER CONTROLS */}
+      {/* ALL FIXTURES LEDGER TABLE & FILTER CONTROLS (DEFAULT VIEW) */}
       {/* ========================================================================= */}
-      {activeTab === "past" && (
+      {!inspectedFixture && (
         <div className="space-y-4 animate-in fade-in">
           {/* Filter & Search Bar */}
           <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm">
@@ -734,8 +737,7 @@ export default function DecisionHistory() {
                         }`}
                         onClick={() => {
                           setRequirement(f);
-                          setActiveTab("current");
-                          toast.success(`Loaded Fixture #${f.id} into Active Inspector!`);
+                          setInspectedFixture(f);
                         }}
                       >
                         <td className="p-3">
@@ -778,11 +780,12 @@ export default function DecisionHistory() {
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setRequirement(f);
-                                setActiveTab("current");
+                                setInspectedFixture(f);
                               }}
-                              className="px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-800 text-[11px] font-bold inline-flex items-center gap-1 border border-slate-300"
+                              className="px-2.5 py-1 rounded bg-blue-50 hover:bg-blue-100 text-blue-900 border border-blue-200 text-[11px] font-bold inline-flex items-center gap-1 shadow-sm transition-colors"
                             >
-                              Inspect
+                              <Eye size={12} />
+                              <span>Inspect</span>
                             </button>
                             <button
                               onClick={(e) => {

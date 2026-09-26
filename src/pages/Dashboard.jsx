@@ -238,13 +238,25 @@ export default function Dashboard() {
     portDiverted, approvePortDiversion,
     resetSimulation,
     getCurrentLeg,
-    simActive
+    simActive,
+    bookSampleSingaporeDhamra,
+    acceptContractorFixture
   } = useFlow();
 
-  const hasBookedVessel = Boolean(requirement && requirement.status === "ACTIVE_IN_TRANSIT");
+  const hasActiveBooking = Boolean(
+    requirement && 
+    requirement.status !== "COMPLETED" &&
+    requirement.originPort && 
+    requirement.destinationPort
+  );
+  const isContractorAccepted = Boolean(
+    hasActiveBooking && 
+    requirement.contractorAccepted && 
+    (requirement.status === "ACTIVE_IN_TRANSIT" || requirement.status === "ACCEPTED")
+  );
+  const showSimulation = Boolean(isContractorAccepted && simActive);
+  const hasBookedVessel = showSimulation;
   const currentLeg = getCurrentLeg();
-
-
 
   // Simulated days & hours based on simProgress (0-100% represents 72 hours)
   const totalHoursElapsed = Math.floor((simProgress / 100) * 72);
@@ -257,12 +269,12 @@ export default function Dashboard() {
   }
 
   // Active Origin & Destination Nodes for Dedicated Vessel
-  const originKey = requirement?.originPort || "Newcastle";
-  const originHub = SIM_NODES[originKey] || SIM_NODES["Newcastle"];
+  const originKey = requirement?.originPort || "Singapore";
+  const originHub = SIM_NODES[originKey] || SIM_NODES["Singapore"] || SIM_NODES["Newcastle"];
 
-  const destKey = portDiverted ? "Krishnapatnam" : (requirement?.destinationPort || "Paradip");
-  const destObj = DEST_NODES[destKey] || DEST_NODES["Paradip"];
-  const origDestObj = DEST_NODES[requirement?.destinationPort || "Paradip"] || DEST_NODES["Paradip"];
+  const destKey = portDiverted ? "Krishnapatnam" : (requirement?.destinationPort || "Dhamra");
+  const destObj = DEST_NODES[destKey] || DEST_NODES["Dhamra"] || DEST_NODES["Paradip"];
+  const origDestObj = DEST_NODES[requirement?.destinationPort || "Dhamra"] || DEST_NODES["Paradip"];
 
   const srcSiding = { x: originHub.sidingX, y: originHub.sidingY, name: requirement?.originWarehouse || originHub.sidingName };
   const srcPort = { x: originHub.portX, y: originHub.portY, name: originHub.portName };
@@ -323,11 +335,18 @@ export default function Dashboard() {
     }
 
     // 5. Last Mile Road: 85% to 100% (Destination Port ➔ Steel Complex)
-    const t = (simProgress - 85) / 15;
+    const t = Math.min(1, (simProgress - 85) / 15);
     const x = targetPort.x + (targetPlant.x - targetPort.x) * t;
     const y = targetPort.y + (targetPlant.y - targetPort.y) * t;
     const angle = Math.atan2(targetPlant.y - targetPort.y, targetPlant.x - targetPort.x) * (180 / Math.PI);
-    return { type: "TRUCK", stage: "LAST_MILE", x, y, angle, label: "Last-Mile Steel Plant Delivery" };
+    return { 
+      type: "TRUCK", 
+      stage: simProgress >= 100 ? "DELIVERED" : "LAST_MILE", 
+      x, 
+      y, 
+      angle, 
+      label: simProgress >= 100 ? "Cargo Delivered to Plant (Completed)" : "Last-Mile Steel Plant Delivery" 
+    };
   };
 
   const asset = calculateWorldAssetPosition();
@@ -433,29 +452,6 @@ export default function Dashboard() {
     );
   }
 
-  // DEFAULT (company / logistics_manager): Show map-only on plain load/refresh.
-  // Show full simulation only after contractor accepts (simActive set via sessionStorage).
-  if (!simActive) {
-    return (
-      <div className="space-y-4" data-testid="dashboard-map-only">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <div className="text-xs uppercase font-mono font-bold text-slate-400 tracking-wider mb-1">Live Geospatial Radar</div>
-            <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight" style={{ fontFamily: "Manrope" }}>
-              Bay of Bengal Multimodal Corridor & East Coast Ports
-            </h1>
-          </div>
-          <div className="flex items-center gap-4 text-xs font-mono text-slate-600">
-            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block" /> Panamax Vessel (MV Bengal Voyager)</span>
-            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block" /> Road Fleet Feeders</span>
-            <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" /> East Coast Terminals</span>
-          </div>
-        </div>
-        <EastCoastMap originPort="Newcastle" activePort="Paradip" />
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-6" data-testid="dashboard-page">
       {/* Real-time Contractor Status Notification Banner for Company Profile */}
@@ -503,23 +499,65 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* Awaiting Contractor Confirmation Banner (Appears after booking) */}
       {requirement?.status === "PENDING_REVIEW" && (
-        <div className="p-4 rounded-xl border border-purple-300 bg-purple-50 text-purple-900 shadow-sm flex items-center justify-between gap-3 font-mono text-xs">
+        <div className="p-4 rounded-xl border border-purple-300 bg-purple-50 text-purple-900 shadow-sm flex flex-wrap items-center justify-between gap-3 font-mono text-xs">
           <div className="flex items-center gap-2.5">
             <span className="text-xl">📡</span>
             <div>
-              <strong className="font-bold text-purple-950">Requirement Submitted to Contractor Desk:</strong>
-              <div className="text-purple-800 text-[11px] mt-0.5">Tata NYK Shipping chartering team is reviewing cargo specifications and ballast fleet positions.</div>
+              <strong className="font-bold text-purple-950">Requirement #{requirement.id} Submitted to Contractor Desk:</strong>
+              <div className="text-purple-800 text-[11px] mt-0.5">
+                Route: <span className="font-bold text-purple-950">{requirement.originPort} ➔ {requirement.destinationPort}</span> ({requirement.cargoQuantity?.toLocaleString() || "70,000"} MT {requirement.cargoType || "Coal"}). Reviewing ballast fleet.
+              </div>
             </div>
           </div>
-          <span className="px-2.5 py-1 rounded bg-purple-200 text-purple-950 font-bold text-[10px] animate-pulse">Awaiting Contractor Confirmation</span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => acceptContractorFixture(requirement.id)}
+              className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow transition-all flex items-center gap-1.5"
+            >
+              <span>⚡ Accept Fixture (Contractor Desk)</span>
+            </button>
+            <span className="px-2.5 py-1 rounded bg-purple-200 text-purple-950 font-bold text-[10px] animate-pulse">Awaiting Confirmation</span>
+          </div>
         </div>
       )}
 
-          {/* ========================================================================= */}
-          {/* MASTER WORLD MAP 2D MULTIMODAL VISUAL SIMULATION CANVAS (ONLY WHEN BOOKED) */}
-          {/* ========================================================================= */}
-          {hasBookedVessel && (
+      {/* Clean Radar View Banner (Shown when no active booking exists, e.g. after refresh) */}
+      {!hasActiveBooking && (
+        <div className="p-4 rounded-xl border border-blue-200 bg-gradient-to-r from-blue-950 via-slate-900 to-blue-950 text-white shadow-md flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-lg bg-blue-600/30 border border-blue-400 text-blue-300">
+              <Ship className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="text-[10px] uppercase font-bold tracking-wider text-amber-400 font-mono">Maritime GIS · Clean Radar View</div>
+              <div className="text-sm font-bold text-white">No Active Sea Corridors Booked</div>
+              <div className="text-xs text-slate-300">Book a cargo shipment to generate live multimodal transit routes and simulation.</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={bookSampleSingaporeDhamra}
+              className="px-4 py-2 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5"
+            >
+              <Sparkles size={14} className="text-amber-300" />
+              <span>⚡ Book Shipment (Singapore ➔ Dhamra)</span>
+            </button>
+            <Link
+              to="/new-requirement"
+              className="px-3.5 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white font-bold text-xs border border-white/20 transition-all flex items-center gap-1.5"
+            >
+              <span>+ Custom Booking</span>
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MASTER WORLD MAP 2D MULTIMODAL VISUAL SIMULATION CANVAS (ONLY AFTER ACCEPTING) */}
+      {/* ========================================================================= */}
+      {showSimulation && (
           <div className="astra-card p-5 bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 text-white shadow-xl space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-blue-900/60 pb-3">
           <div className="flex items-center gap-3">
@@ -543,10 +581,27 @@ export default function Dashboard() {
           <div className="flex items-center gap-2">
             <button
               onClick={togglePlay}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-md bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all shadow"
+              disabled={simProgress >= 100}
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-white text-xs font-bold transition-all shadow ${
+                simProgress >= 100 ? "bg-emerald-700 cursor-default" : "bg-blue-600 hover:bg-blue-500"
+              }`}
             >
-              {isPlaying ? <Pause size={14} /> : <Play size={14} />}
-              <span>{isPlaying ? "Pause" : "Play"}</span>
+              {simProgress >= 100 ? (
+                <>
+                  <CheckCircle2 size={14} className="text-emerald-300" />
+                  <span>Completed</span>
+                </>
+              ) : isPlaying ? (
+                <>
+                  <Pause size={14} />
+                  <span>Pause</span>
+                </>
+              ) : (
+                <>
+                  <Play size={14} />
+                  <span>Play</span>
+                </>
+              )}
             </button>
 
             <button
@@ -824,6 +879,19 @@ export default function Dashboard() {
                   </g>
                 </g>
 
+                {/* Vessel Docked at Destination Port once arrived */}
+                {simProgress >= 75 && (
+                  <g transform={`translate(${targetPort.x + 5}, ${targetPort.y}) rotate(-90)`}>
+                    <g transform="scale(0.7)">
+                      <TopDownVesselIcon category={requirement?.selectedVessel?.category || "Panamax"} size={22} />
+                    </g>
+                    <rect x="12" y="-7" width="105" height="14" rx="3" fill="#0F172A" stroke="#06B6D4" strokeWidth="0.8" opacity="0.9" />
+                    <text x="64" y="3" fontSize="6.5" fill="#67E8F9" fontWeight="bold" fontFamily="monospace" textAnchor="middle">
+                      ⚓ {requirement?.selectedVessel?.name || "Vessel"} (At Port)
+                    </text>
+                  </g>
+                )}
+
                 {/* 5. REAL-TIME LIVE MOVING 2D ASSET (TOP-DOWN TRUCK OR SHIP) */}
                 <g 
                   id="live-traveling-asset"
@@ -915,7 +983,17 @@ export default function Dashboard() {
 
           {/* Canvas Bottom Mini HUD */}
           <div className="absolute bottom-2 left-3 right-3 flex items-center justify-between text-[10px] font-mono text-slate-300 bg-slate-900/80 backdrop-blur px-3 py-1.5 rounded-lg border border-slate-700/80">
-            {hasBookedVessel ? (
+            {simProgress >= 100 ? (
+              <div className="w-full flex items-center justify-between text-emerald-400 font-bold">
+                <span className="flex items-center gap-1.5">
+                  <CheckCircle2 size={13} className="text-emerald-300" />
+                  Multimodal Transit Completed: Vessel arrived at {targetPort.name}, Truck delivered material to {targetPlant.name.split(" ")[0]} Plant!
+                </span>
+                <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono">
+                  VOYAGE COMPLETED & SETTLED
+                </span>
+              </div>
+            ) : hasBookedVessel ? (
               <>
                 <span className="flex items-center gap-1.5 text-amber-400 font-bold">
                   <Truck size={12} /> 1. Siding: {srcSiding.name.split(",")[0]}
@@ -1413,9 +1491,10 @@ export default function Dashboard() {
 
         <div className="w-full rounded-xl overflow-hidden border border-slate-200 shadow-sm">
           <EastCoastMap
-            originPort={requirement?.originPort || "Newcastle"}
-            activePort={requirement?.destinationPort || "Paradip"}
-            highlightedPorts={[requirement?.destinationPort || "Paradip", "Krishnapatnam", "Visakhapatnam"]}
+            originPort={requirement?.originPort || "Singapore"}
+            activePort={requirement?.destinationPort || "Dhamra"}
+            highlightedPorts={[requirement?.destinationPort || "Dhamra", "Krishnapatnam", "Visakhapatnam"]}
+            showRoute={hasActiveBooking}
           />
         </div>
       </div>
